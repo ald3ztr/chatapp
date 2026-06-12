@@ -23,6 +23,7 @@ export function CallProvider({ children }) {
   const [remoteStream, setRemoteStream] = useState(null);
   const [muted, setMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
   const [error, setError] = useState('');
 
   const pcRef = useRef(null);
@@ -30,12 +31,18 @@ export function CallProvider({ children }) {
   const peerRef = useRef(null); // o an goruseilen kullanici
   const incomingOfferRef = useRef(null);
   const pendingIceRef = useRef([]);
+  const cameraTrackRef = useRef(null); // ekran paylasiminda saklanan kamera track'i
+  const screenTrackRef = useRef(null);
 
   const cleanup = useCallback(() => {
     pcRef.current?.close();
     pcRef.current = null;
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    screenTrackRef.current?.stop();
+    screenTrackRef.current = null;
+    cameraTrackRef.current?.stop();
+    cameraTrackRef.current = null;
     peerRef.current = null;
     incomingOfferRef.current = null;
     pendingIceRef.current = [];
@@ -43,6 +50,7 @@ export function CallProvider({ children }) {
     setRemoteStream(null);
     setMuted(false);
     setVideoOff(false);
+    setScreenSharing(false);
     setStatus('idle');
     setPeer(null);
   }, []);
@@ -70,8 +78,21 @@ export function CallProvider({ children }) {
 
   async function getMedia(type) {
     return navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: type === 'video' ? { facingMode: 'user' } : false,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video:
+        type === 'video'
+          ? {
+              facingMode: 'user',
+              width: { ideal: 1280, max: 1920 },
+              height: { ideal: 720, max: 1080 },
+              frameRate: { ideal: 30, max: 30 },
+              aspectRatio: { ideal: 16 / 9 },
+            }
+          : false,
     });
   }
 
@@ -160,6 +181,68 @@ export function CallProvider({ children }) {
     }
   }, []);
 
+  // Karsi tarafa gonderilen video track'ini degistir (kamera <-> ekran)
+  const replaceSentVideo = useCallback((newTrack) => {
+    const sender = pcRef.current?.getSenders().find((s) => s.track && s.track.kind === 'video');
+    return sender?.replaceTrack(newTrack);
+  }, []);
+
+  // Kameraya geri don (ekran paylasimini durdur)
+  const stopScreenShare = useCallback(async () => {
+    const cam = cameraTrackRef.current;
+    screenTrackRef.current?.stop();
+    screenTrackRef.current = null;
+    if (cam) {
+      await replaceSentVideo(cam);
+      // Yerel onizlemeyi de kameraya geri al
+      const ls = localStreamRef.current;
+      if (ls) {
+        ls.getVideoTracks().forEach((t) => { if (t !== cam) ls.removeTrack(t); });
+        if (!ls.getVideoTracks().includes(cam)) ls.addTrack(cam);
+        setLocalStream(new MediaStream(ls.getTracks()));
+      }
+      cameraTrackRef.current = null;
+    }
+    setScreenSharing(false);
+  }, [replaceSentVideo]);
+
+  // Ekran paylasimini baslat
+  const startScreenShare = useCallback(async () => {
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 30, max: 60 } },
+        audio: false,
+      });
+      const screenTrack = display.getVideoTracks()[0];
+      if (!screenTrack) return;
+      // Mevcut kamera track'ini sakla
+      const ls = localStreamRef.current;
+      const cam = ls?.getVideoTracks()[0] || null;
+      cameraTrackRef.current = cam;
+      screenTrackRef.current = screenTrack;
+
+      await replaceSentVideo(screenTrack);
+
+      // Yerel onizlemeyi ekrana cevir (kamerayi durdurmadan)
+      if (ls) {
+        ls.getVideoTracks().forEach((t) => ls.removeTrack(t));
+        ls.addTrack(screenTrack);
+        setLocalStream(new MediaStream(ls.getTracks()));
+      }
+      setScreenSharing(true);
+
+      // Kullanici tarayici cubugundan "paylasimi durdur" derse kameraya don
+      screenTrack.onended = () => stopScreenShare();
+    } catch {
+      // kullanici iptal etti veya izin yok - sessizce gec
+    }
+  }, [replaceSentVideo, stopScreenShare]);
+
+  const toggleScreenShare = useCallback(() => {
+    if (screenSharing) stopScreenShare();
+    else startScreenShare();
+  }, [screenSharing, startScreenShare, stopScreenShare]);
+
   // --- Socket sinyal dinleyicileri ---
   useEffect(() => {
     const s = socket.current;
@@ -217,8 +300,8 @@ export function CallProvider({ children }) {
   }, [socket, connected, status, cleanup, endCall]);
 
   const value = {
-    status, peer, callType, localStream, remoteStream, muted, videoOff, error,
-    startCall, acceptCall, rejectCall, endCall, toggleMute, toggleVideo,
+    status, peer, callType, localStream, remoteStream, muted, videoOff, screenSharing, error,
+    startCall, acceptCall, rejectCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
     clearError: () => setError(''),
   };
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>;

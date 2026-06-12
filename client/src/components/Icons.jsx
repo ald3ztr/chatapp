@@ -199,6 +199,25 @@ export const VideoOff = (p) => (
   </Svg>
 );
 
+export const ScreenShare = (p) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+    <line x1="8" y1="21" x2="16" y2="21" />
+    <line x1="12" y1="17" x2="12" y2="21" />
+    <path d="M12 13V7" />
+    <path d="M9.5 9.5L12 7l2.5 2.5" />
+  </Svg>
+);
+
+export const ScreenShareOff = (p) => (
+  <Svg {...p}>
+    <path d="M2 3h18a2 2 0 0 1 2 2v9m-2 3H4a2 2 0 0 1-2-2V5" />
+    <line x1="8" y1="21" x2="16" y2="21" />
+    <line x1="12" y1="17" x2="12" y2="21" />
+    <line x1="1" y1="1" x2="23" y2="23" />
+  </Svg>
+);
+
 export const Users = (p) => (
   <Svg {...p}>
     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />

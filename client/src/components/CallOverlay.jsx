@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useCall } from '../context/CallContext.jsx';
 import Avatar from './Avatar.jsx';
-import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from './Icons.jsx';
+import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, ScreenShare, ScreenShareOff } from './Icons.jsx';
 
 function CallTimer() {
   const [s, setS] = useState(0);
@@ -33,8 +33,8 @@ function Media({ stream, audio, muted, className }) {
 
 export default function CallOverlay() {
   const {
-    status, peer, callType, localStream, remoteStream, muted, videoOff,
-    acceptCall, rejectCall, endCall, toggleMute, toggleVideo,
+    status, peer, callType, localStream, remoteStream, muted, videoOff, screenSharing,
+    acceptCall, rejectCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
   } = useCall();
 
   if (status === 'idle' || !peer) return null;
@@ -63,7 +63,11 @@ export default function CallOverlay() {
       {/* Goruntulu konusmada yerel kamera (kucuk pencere) */}
       {status === 'connected' && isVideo && localStream && (
         <div className="absolute right-4 top-4 h-40 w-28 overflow-hidden rounded-xl border border-white/20 bg-black">
-          <Media stream={localStream} muted className="h-full w-full object-cover" />
+          <Media
+            stream={localStream}
+            muted
+            className={`h-full w-full ${screenSharing ? 'object-contain' : 'object-cover -scale-x-100'}`}
+          />
         </div>
       )}
 
@@ -99,6 +103,11 @@ export default function CallOverlay() {
             {status === 'connected' && isVideo && (
               <button onClick={toggleVideo} className={`${ctrlBtn} ${videoOff ? 'bg-white text-neutral-900' : 'bg-white/15'}`} aria-label="Kamerayi ac/kapat">
                 {videoOff ? <VideoOff size={24} /> : <Video size={24} />}
+              </button>
+            )}
+            {status === 'connected' && isVideo && (
+              <button onClick={toggleScreenShare} className={`${ctrlBtn} ${screenSharing ? 'bg-white text-neutral-900' : 'bg-white/15'}`} aria-label="Ekran paylas">
+                {screenSharing ? <ScreenShareOff size={24} /> : <ScreenShare size={24} />}
               </button>
             )}
             <button onClick={endCall} className={`${ctrlBtn} bg-red-500`} aria-label="Aramayi bitir">
