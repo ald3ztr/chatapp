@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+
+# SQLite veritabani (ileriki fazlar)
+server/data/*.db
+server/data/*.db-*
+
+# Yuklenen dosyalar (ileriki fazlar) - klasor kalsin, icerik gitmesin
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Gecici test scriptleri ve yerel arac ayarlari
+_*.mjs
+.claude/

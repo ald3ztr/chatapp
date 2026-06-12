@@ -1,0 +1,20 @@
+{
+  "name": "ArzuDigital Chat",
+  "short_name": "ArzuDigital",
+  "description": "Arkadaslar arasi gercek zamanli sohbet uygulamasi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#8b5cf6",
+  "lang": "tr",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
