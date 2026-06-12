@@ -16,13 +16,21 @@ import ImageLightbox from '../components/ImageLightbox.jsx';
 import ReactionBar from '../components/ReactionBar.jsx';
 import {
   ChevronLeft, Phone, Video, Camera, Mic, ImageIcon, Smile, Plus, Send,
-  Trash, Music, Clock, AlertCircle, ChatBubble, Check, CheckCheck,
+  Trash, Music, Clock, AlertCircle, ChatBubble, Check, CheckCheck, X,
 } from '../components/Icons.jsx';
 import { formatTime, formatDaySeparator, formatLastSeen, sameDay } from '../lib/time.js';
 
 function fmtElapsed(ms) {
   const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// Yanitlanan mesaj icin kisa onizleme metni
+function snippetOf(m) {
+  if (!m) return 'Mesaj';
+  if (m.type === 'image') return '📷 Fotograf';
+  if (m.type === 'audio') return '🎤 Sesli mesaj';
+  return m.body || '';
 }
 
 // Gonderdigim mesajin durumu: bekliyor / gonderildi / iletildi / okundu
@@ -51,6 +59,7 @@ export default function ChatScreen({ peer, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
   const [reactingId, setReactingId] = useState(null);
+  const [replyingTo, setReplyingTo] = useState(null); // yanitlanan mesaj
 
   const bottomRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -135,11 +144,13 @@ export default function ChatScreen({ peer, onBack }) {
   async function sendMessage({ type = 'text', body = '', file = null, durationMs = null }) {
     const tempId = `temp-${Date.now()}`;
     const localUrl = file ? URL.createObjectURL(file) : null;
+    const replyTo = replyingTo?.id || null;
     const temp = {
       id: tempId, senderId: user.id, receiverId: peer.id,
-      body, type, mediaUrl: localUrl, durationMs, createdAt: Date.now(), pending: true, reactions: [],
+      body, type, mediaUrl: localUrl, durationMs, replyTo, createdAt: Date.now(), pending: true, reactions: [],
     };
     setMessages((prev) => [...prev, temp]);
+    setReplyingTo(null);
 
     try {
       let mediaUrl = null;
@@ -152,7 +163,7 @@ export default function ChatScreen({ peer, onBack }) {
       const saved = await new Promise((resolve, reject) => {
         const s = socket.current;
         if (!s) return reject(new Error('Baglanti yok'));
-        s.emit('message:send', { toUserId: peer.id, type, body, mediaUrl, durationMs }, (res) =>
+        s.emit('message:send', { toUserId: peer.id, type, body, mediaUrl, durationMs, replyTo }, (res) =>
           res?.error ? reject(new Error(res.error)) : resolve(res.message)
         );
       });
@@ -276,6 +287,22 @@ export default function ChatScreen({ peer, onBack }) {
               const prev = messages[i - 1];
               const showDay = !prev || !sameDay(prev.createdAt, m.createdAt);
               const isImage = m.type === 'image';
+              // Yanitlanan (alintilanan) mesaj - yuklenmis mesajlar arasinda ara
+              const orig = m.replyTo ? messages.find((x) => x.id === m.replyTo) : null;
+              const quoteBlock = m.replyTo ? (
+                <div
+                  className={`mb-1 rounded-lg border-l-[3px] px-2 py-1 text-xs ${
+                    mine
+                      ? 'border-white/80 bg-white/15 text-white/90'
+                      : 'border-violet-400 bg-black/[0.04] text-gray-600 dark:bg-white/10 dark:text-neutral-300'
+                  }`}
+                >
+                  <span className="font-semibold">
+                    {orig ? (orig.senderId === user.id ? 'Sen' : peer.username) : 'Mesaj'}
+                  </span>
+                  <span className="block max-w-[12rem] truncate opacity-80">{snippetOf(orig)}</span>
+                </div>
+              ) : null;
               // Gelen mesaj grubunun son baloncugu mu? (avatar sadece orada gosterilir)
               const next = messages[i + 1];
               const isLastOfGroup = !mine && (!next || next.senderId !== m.senderId);
@@ -307,7 +334,19 @@ export default function ChatScreen({ peer, onBack }) {
                     )}
                     <div className={`flex min-w-0 flex-col ${mine ? 'items-end' : 'items-start'}`}>
                       {reactingId === m.id && (
-                        <ReactionBar mine={mine} current={myReaction} onPick={(e) => react(m.id, e)} />
+                        <div className={`mb-1 flex items-center gap-1.5 ${mine ? 'flex-row-reverse' : ''}`}>
+                          <ReactionBar mine={mine} current={myReaction} onPick={(e) => react(m.id, e)} />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReplyingTo(m);
+                              setReactingId(null);
+                            }}
+                            className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 shadow-sm dark:bg-neutral-800 dark:text-neutral-200"
+                          >
+                            ↩ Yanitla
+                          </button>
+                        </div>
                       )}
                       {/* Baloncuk + tepki rozetleri (rozetler baloncugun DISINDA, kirpilmaz) */}
                       <div className="relative w-fit max-w-[78%]">
@@ -328,32 +367,53 @@ export default function ChatScreen({ peer, onBack }) {
                         } ${m.failed ? 'opacity-60 ring-2 ring-red-400' : ''}`}
                       >
                         {isImage ? (
-                          <img
-                            src={m.mediaUrl}
-                            alt="gorsel"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              m.mediaUrl && setLightbox(m.mediaUrl);
-                            }}
-                            className="max-h-72 w-full object-cover"
-                          />
+                          quoteBlock ? (
+                            <div className="p-1">
+                              {quoteBlock}
+                              <img
+                                src={m.mediaUrl}
+                                alt="gorsel"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  m.mediaUrl && setLightbox(m.mediaUrl);
+                                }}
+                                className="max-h-72 w-full rounded-2xl object-cover"
+                              />
+                            </div>
+                          ) : (
+                            <img
+                              src={m.mediaUrl}
+                              alt="gorsel"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                m.mediaUrl && setLightbox(m.mediaUrl);
+                              }}
+                              className="max-h-72 w-full object-cover"
+                            />
+                          )
                         ) : m.type === 'audio' ? (
-                          <div className="flex items-end gap-2">
-                            <AudioPlayer src={m.mediaUrl} durationMs={m.durationMs} mine={mine} />
-                            <span className={`flex items-center gap-1 text-[10px] ${mine ? 'text-white/70' : 'text-gray-400'}`}>
-                              {formatTime(m.createdAt)} {mine && <Status m={m} />}
-                            </span>
+                          <div>
+                            {quoteBlock}
+                            <div className="flex items-end gap-2">
+                              <AudioPlayer src={m.mediaUrl} durationMs={m.durationMs} mine={mine} />
+                              <span className={`flex items-center gap-1 text-[10px] ${mine ? 'text-white/70' : 'text-gray-400'}`}>
+                                {formatTime(m.createdAt)} {mine && <Status m={m} />}
+                              </span>
+                            </div>
                           </div>
                         ) : (
-                          <span className="inline">
-                            <span className="whitespace-pre-wrap break-words">{m.body}</span>
-                            <span className="ml-2 inline-flex translate-y-0.5 items-center gap-1">
-                              <span className={`text-[10px] ${mine ? 'text-white/70' : 'text-gray-400 dark:text-neutral-500'}`}>
-                                {formatTime(m.createdAt)}
+                          <>
+                            {quoteBlock}
+                            <span className="inline">
+                              <span className="whitespace-pre-wrap break-words">{m.body}</span>
+                              <span className="ml-2 inline-flex translate-y-0.5 items-center gap-1">
+                                <span className={`text-[10px] ${mine ? 'text-white/70' : 'text-gray-400 dark:text-neutral-500'}`}>
+                                  {formatTime(m.createdAt)}
+                                </span>
+                                {mine && <Status m={m} />}
                               </span>
-                              {mine && <Status m={m} />}
                             </span>
-                          </span>
+                          </>
                         )}
                       </div>
 
@@ -397,6 +457,25 @@ export default function ChatScreen({ peer, onBack }) {
         className="border-t border-gray-100 px-2 py-2 dark:border-neutral-800"
         style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}
       >
+        {/* Yanit onizleme cubugu */}
+        {replyingTo && (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border-l-[3px] border-violet-500 bg-gray-100 px-3 py-2 dark:bg-neutral-800">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-violet-600 dark:text-violet-300">
+                {replyingTo.senderId === user.id ? 'Kendine yanit' : `${peer.username} kullanicisina yanit`}
+              </p>
+              <p className="truncate text-xs text-gray-500 dark:text-neutral-400">{snippetOf(replyingTo)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyingTo(null)}
+              className="shrink-0 rounded-full p-1 text-gray-500 hover:bg-gray-200 dark:hover:bg-neutral-700"
+              aria-label="Yaniti iptal et"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
         {recorder.recording ? (
           <div className="flex items-center gap-3 px-1">
             <span className="flex items-center gap-2 text-red-500">

@@ -2,7 +2,7 @@
 // Express + Socket.IO. FAZ 1: kimlik. FAZ 2: birebir gercek zamanli metin sohbeti.
 
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,9 +41,24 @@ function runUpload(req, res) {
 }
 
 const USERNAME_RE = /^[a-zA-Z0-9._]{2,20}$/;
+const PIN_RE = /^\d{4}$/;
 
 function normalizeUsername(raw) {
   return (raw || '').trim();
+}
+
+// --- 4 haneli PIN: salt:hash (scrypt) olarak sakla/dogrula ---
+function hashPin(pin) {
+  const salt = randomBytes(16);
+  const hash = scryptSync(String(pin), salt, 32);
+  return `${salt.toString('hex')}:${hash.toString('hex')}`;
+}
+function verifyPin(pin, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [saltHex, hashHex] = stored.split(':');
+  const hash = Buffer.from(hashHex, 'hex');
+  const check = scryptSync(String(pin), Buffer.from(saltHex, 'hex'), 32);
+  return hash.length === check.length && timingSafeEqual(hash, check);
 }
 
 // --- Kayit: dogrulama yok, kullanici adi (+ opsiyonel foto) ile aninda ---
@@ -55,13 +70,24 @@ app.post('/api/register', async (req, res) => {
   }
 
   const username = normalizeUsername(req.body.username);
+  const pin = String(req.body.pin || '');
   if (!USERNAME_RE.test(username)) {
     return res.status(400).json({
       error: 'Kullanici adi 2-20 karakter olmali; harf, rakam, nokta ve alt cizgi icerebilir.',
     });
   }
-  if (usersRepo.findByUsername(username)) {
-    return res.status(409).json({ error: 'Bu kullanici adi zaten alinmis.' });
+  if (!PIN_RE.test(pin)) {
+    return res.status(400).json({ error: 'PIN tam olarak 4 rakam olmali.' });
+  }
+
+  const existing = usersRepo.findByUsername(username);
+  if (existing) {
+    // PIN'i olan hesap zaten kayitli; PIN'siz eski hesap "sahiplenilebilir"
+    if (existing.pin_hash) {
+      return res.status(409).json({ error: 'Bu kullanici adi zaten alinmis. Giris yapmayi dene.' });
+    }
+    const row = usersRepo.setPin(existing.id, hashPin(pin));
+    return res.status(200).json({ token: row.token, user: publicUser(row) });
   }
 
   const avatarUrl = req.file ? `/uploads/${req.file.filename}` : null;
@@ -70,10 +96,31 @@ app.post('/api/register', async (req, res) => {
     username,
     token: randomUUID(),
     avatarUrl,
+    pinHash: hashPin(pin),
   });
 
   // Token + kullanici don (istemci token'i localStorage'a yazacak)
   res.status(201).json({ token: row.token, user: publicUser(row) });
+});
+
+// --- Giris: kullanici adi + 4 haneli PIN ---
+app.post('/api/login', (req, res) => {
+  const username = normalizeUsername(req.body.username);
+  const pin = String(req.body.pin || '');
+  if (!USERNAME_RE.test(username) || !PIN_RE.test(pin)) {
+    return res.status(400).json({ error: 'Kullanici adi veya PIN gecersiz.' });
+  }
+  const row = usersRepo.findByUsername(username);
+  if (!row) {
+    return res.status(404).json({ error: 'Boyle bir kullanici yok. Once kayit ol.' });
+  }
+  if (!row.pin_hash) {
+    return res.status(403).json({ error: 'Bu hesapta PIN tanimli degil. Kayit ekranindan PIN belirle.' });
+  }
+  if (!verifyPin(pin, row.pin_hash)) {
+    return res.status(401).json({ error: 'PIN yanlis.' });
+  }
+  res.json({ token: row.token, user: publicUser(row) });
 });
 
 // --- Token'dan kullaniciyi bul (otomatik oturum) ---
@@ -413,6 +460,17 @@ io.on('connection', (socket) => {
       const peer = usersRepo.findById(toUserId);
       if (!peer) return ack?.({ error: 'Alici bulunamadi.' });
 
+      // Yanitlanan mesaj: ayni sohbete ait olmali
+      let replyTo = null;
+      if (payload?.replyTo) {
+        const orig = messagesRepo.byId(String(payload.replyTo));
+        const inThread =
+          orig &&
+          ((orig.sender_id === me.id && orig.receiver_id === peer.id) ||
+            (orig.sender_id === peer.id && orig.receiver_id === me.id));
+        if (inThread) replyTo = orig.id;
+      }
+
       const row = messagesRepo.create({
         id: randomUUID(),
         senderId: me.id,
@@ -421,6 +479,7 @@ io.on('connection', (socket) => {
         type,
         mediaUrl,
         durationMs,
+        replyTo,
       });
       let msg = publicMessage(row);
 

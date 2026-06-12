@@ -63,6 +63,14 @@ db.exec(`
 {
   const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!cols.includes('last_seen')) db.exec('ALTER TABLE users ADD COLUMN last_seen INTEGER');
+  // FAZ 6: 4 haneli PIN (salt:hash olarak saklanir)
+  if (!cols.includes('pin_hash')) db.exec('ALTER TABLE users ADD COLUMN pin_hash TEXT');
+}
+
+// FAZ 6: mesaja yanit (alintilanan mesajin id'si)
+{
+  const cols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+  if (!cols.includes('reply_to')) db.exec('ALTER TABLE messages ADD COLUMN reply_to TEXT');
 }
 
 // FAZ 4: mesaj tepkileri (kullanici basina bir emoji)
@@ -115,9 +123,10 @@ db.exec(`
 // --- Sorgular ---
 const stmts = {
   insertUser: db.prepare(`
-    INSERT INTO users (id, username, token, avatar_url, status, created_at, updated_at)
-    VALUES (@id, @username, @token, @avatar_url, @status, @created_at, @updated_at)
+    INSERT INTO users (id, username, token, avatar_url, status, pin_hash, created_at, updated_at)
+    VALUES (@id, @username, @token, @avatar_url, @status, @pin_hash, @created_at, @updated_at)
   `),
+  setPin: db.prepare('UPDATE users SET pin_hash = @pin_hash, updated_at = @updated_at WHERE id = @id'),
   byToken: db.prepare('SELECT * FROM users WHERE token = ?'),
   byId: db.prepare('SELECT * FROM users WHERE id = ?'),
   byUsername: db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE'),
@@ -135,8 +144,8 @@ const stmts = {
 
   // --- Mesajlar (FAZ 2) ---
   insertMessage: db.prepare(`
-    INSERT INTO messages (id, sender_id, receiver_id, body, type, media_url, duration_ms, created_at, read_at)
-    VALUES (@id, @sender_id, @receiver_id, @body, @type, @media_url, @duration_ms, @created_at, NULL)
+    INSERT INTO messages (id, sender_id, receiver_id, body, type, media_url, duration_ms, reply_to, created_at, read_at)
+    VALUES (@id, @sender_id, @receiver_id, @body, @type, @media_url, @duration_ms, @reply_to, @created_at, NULL)
   `),
   messageById: db.prepare('SELECT * FROM messages WHERE id = ?'),
   // Iki kullanici arasindaki gecmis (eskiden yeniye)
@@ -253,6 +262,7 @@ export function publicUser(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastSeen: row.last_seen || null,
+    hasPin: !!row.pin_hash,
   };
 }
 
@@ -267,6 +277,7 @@ export function publicMessage(row) {
     type: row.type || 'text',
     mediaUrl: row.media_url || null,
     durationMs: row.duration_ms || null,
+    replyTo: row.reply_to || null,
     createdAt: row.created_at,
     readAt: row.read_at,
     deliveredAt: row.delivered_at || null,
@@ -274,7 +285,7 @@ export function publicMessage(row) {
 }
 
 export const usersRepo = {
-  create({ id, username, token, avatarUrl = null, status = null }) {
+  create({ id, username, token, avatarUrl = null, status = null, pinHash = null }) {
     const now = Date.now();
     stmts.insertUser.run({
       id,
@@ -282,9 +293,14 @@ export const usersRepo = {
       token,
       avatar_url: avatarUrl,
       status,
+      pin_hash: pinHash,
       created_at: now,
       updated_at: now,
     });
+    return stmts.byId.get(id);
+  },
+  setPin(id, pinHash) {
+    stmts.setPin.run({ id, pin_hash: pinHash, updated_at: Date.now() });
     return stmts.byId.get(id);
   },
   findByToken(token) {
@@ -315,7 +331,7 @@ export const usersRepo = {
 };
 
 export const messagesRepo = {
-  create({ id, senderId, receiverId, body = '', type = 'text', mediaUrl = null, durationMs = null }) {
+  create({ id, senderId, receiverId, body = '', type = 'text', mediaUrl = null, durationMs = null, replyTo = null }) {
     stmts.insertMessage.run({
       id,
       sender_id: senderId,
@@ -324,6 +340,7 @@ export const messagesRepo = {
       type,
       media_url: mediaUrl,
       duration_ms: durationMs,
+      reply_to: replyTo,
       created_at: Date.now(),
     });
     return stmts.messageById.get(id);

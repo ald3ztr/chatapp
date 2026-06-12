@@ -17,9 +17,19 @@ function authHeaders() {
 }
 
 export const api = {
-  // Kayit: FormData (username + opsiyonel avatar dosyasi)
+  // Kayit: FormData (username + pin + opsiyonel avatar dosyasi)
   async register(formData) {
     const res = await fetch('/api/register', { method: 'POST', body: formData });
+    return parse(res); // { token, user }
+  },
+
+  // Giris: kullanici adi + 4 haneli PIN
+  async login(username, pin) {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin }),
+    });
     return parse(res); // { token, user }
   },
 
