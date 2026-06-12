@@ -335,6 +335,29 @@ io.on('connection', (socket) => {
       socket.to(`group:${groupId}`).emit('group:typing', { groupId, from: me, typing: !!typing });
   });
 
+  // --- Sesli/goruntulu arama sinyallesmesi (WebRTC) ---
+  // Sunucu yalnizca offer/answer/ICE mesajlarini iki kullanici arasinda tasir.
+  socket.on('call:invite', ({ toUserId, callType, offer }) => {
+    if (!isOnline(String(toUserId))) return socket.emit('call:unavailable', { toUserId });
+    const type = callType === 'video' ? 'video' : 'audio';
+    emitToUser(String(toUserId), 'call:incoming', { from: me, callType: type, offer });
+  });
+  socket.on('call:accept', ({ toUserId, answer }) => {
+    emitToUser(String(toUserId), 'call:accepted', { from: me, answer });
+  });
+  socket.on('call:reject', ({ toUserId }) => {
+    emitToUser(String(toUserId), 'call:rejected', { from: me.id });
+  });
+  socket.on('call:cancel', ({ toUserId }) => {
+    emitToUser(String(toUserId), 'call:cancelled', { from: me.id });
+  });
+  socket.on('call:ice', ({ toUserId, candidate }) => {
+    emitToUser(String(toUserId), 'call:ice', { from: me.id, candidate });
+  });
+  socket.on('call:end', ({ toUserId }) => {
+    emitToUser(String(toUserId), 'call:ended', { from: me.id });
+  });
+
   if (wasOffline) {
     // Ilk baglanti: herkese cevrimici oldugunu duyur
     broadcastPresence(me.id, true);

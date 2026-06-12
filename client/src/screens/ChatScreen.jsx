@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useChat } from '../context/ChatContext.jsx';
 import { useSocket } from '../context/SocketContext.jsx';
 import { usePresence } from '../context/PresenceContext.jsx';
+import { useCall } from '../context/CallContext.jsx';
 import { useRecorder } from '../lib/useRecorder.js';
 import Avatar from '../components/Avatar.jsx';
 import EmojiPicker from '../components/EmojiPicker.jsx';
@@ -38,6 +39,7 @@ export default function ChatScreen({ peer, onBack }) {
   const { socket, connected } = useSocket();
   const { setActivePeer, markRead, bumpConversation } = useChat();
   const presence = usePresence(peer.id);
+  const { startCall } = useCall();
   const recorder = useRecorder();
 
   const [messages, setMessages] = useState([]);
@@ -47,7 +49,6 @@ export default function ChatScreen({ peer, onBack }) {
   const [showAttach, setShowAttach] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [toast, setToast] = useState('');
   const [peerTyping, setPeerTyping] = useState(false);
   const [reactingId, setReactingId] = useState(null);
 
@@ -130,11 +131,6 @@ export default function ChatScreen({ peer, onBack }) {
     typingTimer.current = setTimeout(() => emitTyping(false), 1500);
   }
   useEffect(() => () => { clearTimeout(typingTimer.current); emitTyping(false); }, []); // eslint-disable-line
-
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(() => setToast(''), 1800);
-  }
 
   async function sendMessage({ type = 'text', body = '', file = null, durationMs = null }) {
     const tempId = `temp-${Date.now()}`;
@@ -256,10 +252,10 @@ export default function ChatScreen({ peer, onBack }) {
             {subtitle}
           </p>
         </div>
-        <button onClick={() => showToast('Sesli arama yakinda')} className={iconBtn} aria-label="Sesli arama">
+        <button onClick={() => startCall(peer, 'audio')} className={iconBtn} aria-label="Sesli arama">
           <Phone size={22} />
         </button>
-        <button onClick={() => showToast('Goruntulu arama yakinda')} className={iconBtn} aria-label="Goruntulu arama">
+        <button onClick={() => startCall(peer, 'video')} className={iconBtn} aria-label="Goruntulu arama">
           <Video size={22} />
         </button>
       </header>
@@ -494,12 +490,6 @@ export default function ChatScreen({ peer, onBack }) {
         )}
         {recorder.error && <p className="mt-1 px-2 text-xs text-red-500">{recorder.error}</p>}
       </div>
-
-      {toast && (
-        <div className="pointer-events-none fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-black/80 px-4 py-2 text-sm text-white">
-          {toast}
-        </div>
-      )}
 
       {lightbox && <ImageLightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </div>

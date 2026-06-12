@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { SocketProvider } from './context/SocketContext.jsx';
 import { PresenceProvider } from './context/PresenceContext.jsx';
 import { ChatProvider } from './context/ChatContext.jsx';
+import { CallProvider } from './context/CallContext.jsx';
+import CallOverlay from './components/CallOverlay.jsx';
 import RegisterScreen from './screens/RegisterScreen.jsx';
 import ChatListScreen from './screens/ChatListScreen.jsx';
 import NewChatScreen from './screens/NewChatScreen.jsx';
@@ -81,7 +83,10 @@ export default function App() {
       <SocketProvider>
         <PresenceProvider>
           <ChatProvider>
-            <Routed />
+            <CallProvider>
+              <Routed />
+              <CallOverlay />
+            </CallProvider>
           </ChatProvider>
         </PresenceProvider>
       </SocketProvider>
