@@ -42,16 +42,17 @@ export function ChatProvider({ children }) {
 
     // DM mesaji
     function onNew({ message, from }) {
+      const mine = message.senderId === user?.id; // kendi mesajim (orn. kendi cevapsiz aramam)
       const isActive = activePeerRef.current === from.id;
-      if (!isActive || document.hidden) playNotification();
+      if (!mine && (!isActive || document.hidden)) playNotification();
       setConversations((prev) => {
         const others = prev.filter((c) => c.partner.id !== from.id);
         const existing = prev.find((c) => c.partner.id === from.id);
         return [
           {
             partner: from,
-            lastMessage: { body: message.body, type: message.type || 'text', createdAt: message.createdAt, mine: false },
-            unread: isActive ? 0 : (existing?.unread || 0) + 1,
+            lastMessage: { body: message.body, type: message.type || 'text', createdAt: message.createdAt, mine },
+            unread: mine || isActive ? existing?.unread || 0 : (existing?.unread || 0) + 1,
           },
           ...others,
         ];

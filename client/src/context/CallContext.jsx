@@ -33,6 +33,9 @@ export function CallProvider({ children }) {
   const pendingIceRef = useRef([]);
   const cameraTrackRef = useRef(null); // ekran paylasiminda saklanan kamera track'i
   const screenTrackRef = useRef(null);
+  const screenAudioTrackRef = useRef(null); // ekran paylasiminin sistem sesi
+  const screenAudioSenderRef = useRef(null);
+  const remoteStreamRef = useRef(null); // gelen track'leri tek stream'de topla
 
   const cleanup = useCallback(() => {
     pcRef.current?.close();
@@ -41,8 +44,12 @@ export function CallProvider({ children }) {
     localStreamRef.current = null;
     screenTrackRef.current?.stop();
     screenTrackRef.current = null;
+    screenAudioTrackRef.current?.stop();
+    screenAudioTrackRef.current = null;
+    screenAudioSenderRef.current = null;
     cameraTrackRef.current?.stop();
     cameraTrackRef.current = null;
+    remoteStreamRef.current = null;
     peerRef.current = null;
     incomingOfferRef.current = null;
     pendingIceRef.current = [];
@@ -62,8 +69,20 @@ export function CallProvider({ children }) {
       pc.onicecandidate = (e) => {
         if (e.candidate) socket.current?.emit('call:ice', { toUserId: otherId, candidate: e.candidate });
       };
-      pc.ontrack = (e) => setRemoteStream(e.streams[0]);
+      // Gelen track'leri tek stream'de topla (ekran sesi gibi sonradan eklenenler video'yu bozmasin)
+      pc.ontrack = (e) => {
+        if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+        if (!remoteStreamRef.current.getTracks().includes(e.track)) {
+          remoteStreamRef.current.addTrack(e.track);
+        }
+        e.track.onended = () => {
+          remoteStreamRef.current?.removeTrack(e.track);
+          if (remoteStreamRef.current) setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+        };
+        setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+      };
       pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') tuneVideoSender({ screen: false });
         if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
           // baglanti koptu
           if (pcRef.current === pc) endCall();
@@ -75,6 +94,37 @@ export function CallProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [socket]
   );
+
+  // Gonderilen video'nun bit hizi/fps sinirini ac (akici 60fps ekran paylasimi icin)
+  async function tuneVideoSender({ screen = false } = {}) {
+    const sender = pcRef.current?.getSenders().find((s) => s.track && s.track.kind === 'video');
+    if (!sender) return;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+      // Ekran paylasiminda yuksek bit hizi + 60fps; kamerada makul deger
+      params.encodings[0].maxBitrate = screen ? 12_000_000 : 3_000_000;
+      params.encodings[0].maxFramerate = screen ? 60 : 30;
+      params.degradationPreference = screen ? 'maintain-framerate' : 'balanced';
+      await sender.setParameters(params);
+    } catch {
+      /* taraici desteklemiyorsa yoksay */
+    }
+  }
+
+  // Baglanti kuruluyken yeni track ekleme/cikarma sonrasi yeniden anlasma (sadece baslatan taraf)
+  async function renegotiate() {
+    const pc = pcRef.current;
+    const other = peerRef.current;
+    if (!pc || !other) return;
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.current?.emit('call:renegotiate', { toUserId: other.id, offer });
+    } catch {
+      /* yoksay */
+    }
+  }
 
   async function getMedia(type) {
     return navigator.mediaDevices.getUserMedia({
@@ -160,10 +210,10 @@ export function CallProvider({ children }) {
     const other = peerRef.current;
     if (other) {
       const ev = status === 'calling' ? 'call:cancel' : 'call:end';
-      socket.current?.emit(ev, { toUserId: other.id });
+      socket.current?.emit(ev, { toUserId: other.id, callType });
     }
     cleanup();
-  }, [status, socket, cleanup]);
+  }, [status, callType, socket, cleanup]);
 
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0];
@@ -192,6 +242,15 @@ export function CallProvider({ children }) {
     const cam = cameraTrackRef.current;
     screenTrackRef.current?.stop();
     screenTrackRef.current = null;
+
+    // Sistem sesini kaldir + yeniden anlas
+    if (screenAudioSenderRef.current) {
+      try { pcRef.current?.removeTrack(screenAudioSenderRef.current); } catch { /* yoksay */ }
+      screenAudioSenderRef.current = null;
+    }
+    screenAudioTrackRef.current?.stop();
+    screenAudioTrackRef.current = null;
+
     if (cam) {
       await replaceSentVideo(cam);
       // Yerel onizlemeyi de kameraya geri al
@@ -202,19 +261,32 @@ export function CallProvider({ children }) {
         setLocalStream(new MediaStream(ls.getTracks()));
       }
       cameraTrackRef.current = null;
+      await tuneVideoSender({ screen: false });
     }
+    await renegotiate();
     setScreenSharing(false);
   }, [replaceSentVideo]);
 
-  // Ekran paylasimini baslat
+  // Ekran paylasimini baslat (60fps + sistem sesi + yuksek bit hizi)
   const startScreenShare = useCallback(async () => {
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 60 } },
-        audio: false,
+        video: {
+          frameRate: { ideal: 60, max: 60 },
+          width: { max: 1920 },
+          height: { max: 1080 },
+        },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
       });
       const screenTrack = display.getVideoTracks()[0];
       if (!screenTrack) return;
+      screenTrack.contentHint = 'motion'; // akicilik onceligi (oyun/video icin)
+      const screenAudioTrack = display.getAudioTracks()[0] || null;
+
       // Mevcut kamera track'ini sakla
       const ls = localStreamRef.current;
       const cam = ls?.getVideoTracks()[0] || null;
@@ -222,6 +294,7 @@ export function CallProvider({ children }) {
       screenTrackRef.current = screenTrack;
 
       await replaceSentVideo(screenTrack);
+      await tuneVideoSender({ screen: true });
 
       // Yerel onizlemeyi ekrana cevir (kamerayi durdurmadan)
       if (ls) {
@@ -229,6 +302,13 @@ export function CallProvider({ children }) {
         ls.addTrack(screenTrack);
         setLocalStream(new MediaStream(ls.getTracks()));
       }
+
+      // Sistem sesi varsa karsi tarafa gonder (yeniden anlasma gerekir)
+      if (screenAudioTrack) {
+        screenAudioTrackRef.current = screenAudioTrack;
+        screenAudioSenderRef.current = pcRef.current?.addTrack(screenAudioTrack, ls || new MediaStream());
+      }
+      await renegotiate();
       setScreenSharing(true);
 
       // Kullanici tarayici cubugundan "paylasimi durdur" derse kameraya don
@@ -279,7 +359,28 @@ export function CallProvider({ children }) {
     const onRejected = () => { setError('Arama reddedildi.'); cleanup(); };
     const onCancelled = () => cleanup();
     const onEnded = () => cleanup();
-    const onUnavailable = () => { setError('Kullanici cevrimdisi.'); cleanup(); };
+    const onUnavailable = () => { setError('Kullanici cevrimdisi. Cevapsiz arama olarak kaydedildi.'); cleanup(); };
+
+    // Yeniden anlasma: karsi taraf track ekledi/cikardi (ornegin ekran sesi)
+    const onRenegotiate = async ({ offer }) => {
+      const pc = pcRef.current;
+      if (!pc) return;
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        s.emit('call:renegotiated', { toUserId: peerRef.current?.id, answer });
+      } catch {
+        /* yoksay */
+      }
+    };
+    const onRenegotiated = async ({ answer }) => {
+      try {
+        await pcRef.current?.setRemoteDescription(new RTCSessionDescription(answer));
+      } catch {
+        /* yoksay */
+      }
+    };
 
     s.on('call:incoming', onIncoming);
     s.on('call:accepted', onAccepted);
@@ -288,6 +389,8 @@ export function CallProvider({ children }) {
     s.on('call:cancelled', onCancelled);
     s.on('call:ended', onEnded);
     s.on('call:unavailable', onUnavailable);
+    s.on('call:renegotiate', onRenegotiate);
+    s.on('call:renegotiated', onRenegotiated);
     return () => {
       s.off('call:incoming', onIncoming);
       s.off('call:accepted', onAccepted);
@@ -296,6 +399,8 @@ export function CallProvider({ children }) {
       s.off('call:cancelled', onCancelled);
       s.off('call:ended', onEnded);
       s.off('call:unavailable', onUnavailable);
+      s.off('call:renegotiate', onRenegotiate);
+      s.off('call:renegotiated', onRenegotiated);
     };
   }, [socket, connected, status, cleanup, endCall]);
 

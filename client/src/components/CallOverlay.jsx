@@ -40,7 +40,8 @@ export default function CallOverlay() {
   if (status === 'idle' || !peer) return null;
 
   const isVideo = callType === 'video';
-  const ctrlBtn = 'flex h-14 w-14 items-center justify-center rounded-full text-white';
+  // text rengini taban sinifa koymuyoruz; her durum kendi rengini belirler (beyaz-ustu-beyaz cakismasini onler)
+  const ctrlBtn = 'flex h-14 w-14 items-center justify-center rounded-full';
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-neutral-900 text-white">
@@ -86,31 +87,31 @@ export default function CallOverlay() {
            style={{ paddingBottom: 'calc(2.5rem + env(safe-area-inset-bottom))' }}>
         {status === 'incoming' ? (
           <>
-            <button onClick={rejectCall} className={`${ctrlBtn} bg-red-500`} aria-label="Reddet">
+            <button onClick={rejectCall} className={`${ctrlBtn} bg-red-500 text-white`} aria-label="Reddet">
               <PhoneOff size={26} />
             </button>
-            <button onClick={acceptCall} className={`${ctrlBtn} bg-green-500`} aria-label="Kabul et">
+            <button onClick={acceptCall} className={`${ctrlBtn} bg-green-500 text-white`} aria-label="Kabul et">
               <Phone size={26} />
             </button>
           </>
         ) : (
           <>
             {status === 'connected' && (
-              <button onClick={toggleMute} className={`${ctrlBtn} ${muted ? 'bg-white text-neutral-900' : 'bg-white/15'}`} aria-label="Sesi ac/kapat">
+              <button onClick={toggleMute} className={`${ctrlBtn} ${muted ? 'bg-white text-neutral-900' : 'bg-white/20 text-white'}`} aria-label="Sesi ac/kapat">
                 {muted ? <MicOff size={24} /> : <Mic size={24} />}
               </button>
             )}
             {status === 'connected' && isVideo && (
-              <button onClick={toggleVideo} className={`${ctrlBtn} ${videoOff ? 'bg-white text-neutral-900' : 'bg-white/15'}`} aria-label="Kamerayi ac/kapat">
+              <button onClick={toggleVideo} className={`${ctrlBtn} ${videoOff ? 'bg-white text-neutral-900' : 'bg-white/20 text-white'}`} aria-label="Kamerayi ac/kapat">
                 {videoOff ? <VideoOff size={24} /> : <Video size={24} />}
               </button>
             )}
             {status === 'connected' && isVideo && (
-              <button onClick={toggleScreenShare} className={`${ctrlBtn} ${screenSharing ? 'bg-white text-neutral-900' : 'bg-white/15'}`} aria-label="Ekran paylas">
+              <button onClick={toggleScreenShare} className={`${ctrlBtn} ${screenSharing ? 'bg-white text-neutral-900' : 'bg-white/20 text-white'}`} aria-label="Ekran paylas">
                 {screenSharing ? <ScreenShareOff size={24} /> : <ScreenShare size={24} />}
               </button>
             )}
-            <button onClick={endCall} className={`${ctrlBtn} bg-red-500`} aria-label="Aramayi bitir">
+            <button onClick={endCall} className={`${ctrlBtn} bg-red-500 text-white`} aria-label="Aramayi bitir">
               <PhoneOff size={26} />
             </button>
           </>

@@ -286,6 +286,28 @@ export default function ChatScreen({ peer, onBack }) {
               const mine = m.senderId === user.id;
               const prev = messages[i - 1];
               const showDay = !prev || !sameDay(prev.createdAt, m.createdAt);
+
+              // Cevapsiz arama: ortada sistem mesaji olarak goster
+              if (m.type === 'call') {
+                let info = {};
+                try { info = JSON.parse(m.body || '{}'); } catch { /* yoksay */ }
+                const vid = info.callType === 'video';
+                return (
+                  <div key={m.id}>
+                    {showDay && (
+                      <div className="my-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-neutral-500">
+                        {formatDaySeparator(m.createdAt)}
+                      </div>
+                    )}
+                    <div className="my-1 flex justify-center">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-500 dark:bg-neutral-800 dark:text-neutral-400">
+                        {vid ? <Video size={13} /> : <Phone size={13} />}
+                        Cevapsiz {vid ? 'goruntulu ' : ''}arama · {formatTime(m.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
               const isImage = m.type === 'image';
               // Yanitlanan (alintilanan) mesaj - yuklenmis mesajlar arasinda ara
               const orig = m.replyTo ? messages.find((x) => x.id === m.replyTo) : null;

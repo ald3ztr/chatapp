@@ -384,8 +384,29 @@ io.on('connection', (socket) => {
 
   // --- Sesli/goruntulu arama sinyallesmesi (WebRTC) ---
   // Sunucu yalnizca offer/answer/ICE mesajlarini iki kullanici arasinda tasir.
+
+  // Cevapsiz aramayi sohbete "call" tipi mesaj olarak kaydet + iki tarafa bildir
+  function logMissedCall(toUserId, callType) {
+    const peer = usersRepo.findById(String(toUserId));
+    if (!peer) return;
+    const row = messagesRepo.create({
+      id: randomUUID(),
+      senderId: me.id,
+      receiverId: peer.id,
+      type: 'call',
+      body: JSON.stringify({ outcome: 'missed', callType: callType === 'video' ? 'video' : 'audio' }),
+    });
+    const message = publicMessage(row);
+    // Aliciya (gelen) ve arayana (giden) canli bildir; offline ise gecmiste gorur
+    emitToUser(peer.id, 'message:new', { message, from: me });
+    emitToUser(me.id, 'message:new', { message, from: publicUser(peer) });
+  }
+
   socket.on('call:invite', ({ toUserId, callType, offer }) => {
-    if (!isOnline(String(toUserId))) return socket.emit('call:unavailable', { toUserId });
+    if (!isOnline(String(toUserId))) {
+      logMissedCall(toUserId, callType); // cevrimdisi: cevapsiz arama olarak dussun
+      return socket.emit('call:unavailable', { toUserId });
+    }
     const type = callType === 'video' ? 'video' : 'audio';
     emitToUser(String(toUserId), 'call:incoming', { from: me, callType: type, offer });
   });
@@ -395,14 +416,22 @@ io.on('connection', (socket) => {
   socket.on('call:reject', ({ toUserId }) => {
     emitToUser(String(toUserId), 'call:rejected', { from: me.id });
   });
-  socket.on('call:cancel', ({ toUserId }) => {
+  socket.on('call:cancel', ({ toUserId, callType }) => {
     emitToUser(String(toUserId), 'call:cancelled', { from: me.id });
+    logMissedCall(toUserId, callType); // arayan cevap gelmeden kapatti: cevapsiz arama
   });
   socket.on('call:ice', ({ toUserId, candidate }) => {
     emitToUser(String(toUserId), 'call:ice', { from: me.id, candidate });
   });
   socket.on('call:end', ({ toUserId }) => {
     emitToUser(String(toUserId), 'call:ended', { from: me.id });
+  });
+  // Yeniden anlasma (track ekleme/cikarma, ornegin ekran sesi)
+  socket.on('call:renegotiate', ({ toUserId, offer }) => {
+    emitToUser(String(toUserId), 'call:renegotiate', { from: me.id, offer });
+  });
+  socket.on('call:renegotiated', ({ toUserId, answer }) => {
+    emitToUser(String(toUserId), 'call:renegotiated', { from: me.id, answer });
   });
 
   if (wasOffline) {

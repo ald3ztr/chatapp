@@ -25,6 +25,15 @@ function Preview({ m }) {
         <Mic size={14} /> Sesli mesaj
       </span>
     );
+  if (m.type === 'call') {
+    let info = {};
+    try { info = JSON.parse(m.body || '{}'); } catch { /* yoksay */ }
+    return (
+      <span className="inline-flex items-center gap-1">
+        📞 Cevapsiz {info.callType === 'video' ? 'goruntulu ' : ''}arama
+      </span>
+    );
+  }
   return <>{m.body}</>;
 }
 
